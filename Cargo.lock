@@ -35,6 +35,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f04c8f8007e8a1813ba933df2d8fb50cad04e0d9e89a22d64485f25a6a6c35d8"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -76,13 +85,6 @@ name = "libc"
 version = "0.2.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
-
-[[package]]
-name = "make-wallpaper-thumbnail"
-version = "0.1.0"
-dependencies = [
- "clap",
-]
 
 [[package]]
 name = "once_cell"
@@ -175,6 +177,14 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "wallpaper-manager"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+]
 
 [[package]]
 name = "winapi"

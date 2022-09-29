@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::{generate, Generator, Shell};
 use std::env;
 use std::fs::{create_dir_all, read_dir};
 use std::io::Write;
@@ -60,7 +61,7 @@ fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
     }
 }
 
-fn daemonize(wallpapers_dir: &PathBuf, socket_path: &PathBuf) {
+fn daemonize(socket_path: &PathBuf) {
     Command::new("xwinwrap")
         .args([
             "-ov",
@@ -72,7 +73,7 @@ fn daemonize(wallpapers_dir: &PathBuf, socket_path: &PathBuf) {
             "mpv",
             "-wid",
             "WID",
-            &wallpapers_dir.to_string_lossy(),
+            "--idle=",
             "--no-osc",
             "--no-osd-bar",
             "--loop-file",
@@ -123,28 +124,26 @@ fn select_wallpaper(wallpapers_dir: &PathBuf, cache_dir: &PathBuf, socket_path: 
                 dir_entry_path.to_string_lossy()
             );
 
-            println!(
-                "Writing payload {} to socket at {}",
-                payload,
-                socket_path.to_string_lossy()
-            );
             socket_stream
                 .write_all(&payload.bytes().collect::<Vec<u8>>())
                 .expect("Failed to write to MPV socket.");
+            return;
         };
     }
+
+    panic!("Failed to find a wallpaper that corresponds to the cached file. Is the cache stale?");
 }
 
-/// Simple program to greet a person
+/// Program to manage my personal wallpapers
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
     /// The directory to look for the wallpapers
+    #[arg(short, long)]
     wallpapers_dir: Option<PathBuf>,
 
-    #[arg(short, long)]
     // The directory to store the thumbnails
+    #[arg(short, long)]
     cache_dir: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -154,14 +153,14 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Daemon {
-        #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         // The path to the MPV socket. Defaults to /tmp/wallpaper-mpv-socket
+        #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         socket_path: PathBuf,
     },
     GenerateThumbnails {},
     SelectWallpaper {
-        #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         // The path to the MPV socket. Defaults to /tmp/wallpaper-mpv-socket
+        #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         socket_path: PathBuf,
     },
 }
@@ -187,7 +186,7 @@ fn main() {
     });
 
     match &args.command {
-        Commands::Daemon { socket_path } => daemonize(&wallpapers_dir, &socket_path),
+        Commands::Daemon { socket_path } => daemonize(&socket_path),
         Commands::GenerateThumbnails {} => generate_thumbnails(&wallpapers_dir, &cache_dir),
         Commands::SelectWallpaper { socket_path } => {
             select_wallpaper(&wallpapers_dir, &cache_dir, &socket_path)
