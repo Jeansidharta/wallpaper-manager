@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use clap_complete::{generate, Generator, Shell};
 use std::env;
 use std::fs::{create_dir_all, read_dir};
 use std::io::Write;
