@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
 use std::env;
 use std::fs::{create_dir_all, read_dir};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
+use std::process::exit;
 use std::process::Command;
 
 fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
@@ -54,7 +55,16 @@ fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
                 &*cache_path.to_string_lossy(),
             ])
             .spawn()
-            .expect("ffmpeg failed to start")
+            .unwrap_or_else(|err| match err.kind() {
+                ErrorKind::NotFound => {
+                    println!("ffmpeg binary not found");
+                    exit(-1);
+                }
+                _ => {
+                    println!("Could not start ffmpeg");
+                    exit(-1);
+                }
+            })
             .wait()
             .expect("ffmpeg failed");
     }
