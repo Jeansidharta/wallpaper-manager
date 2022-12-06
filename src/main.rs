@@ -59,6 +59,8 @@ fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
                 "00:00:00.000",
                 "-vframes",
                 "1",
+                "-vf",
+                "scale=520:-1",
                 &*cache_path.to_string_lossy(),
             ])
             .spawn()
