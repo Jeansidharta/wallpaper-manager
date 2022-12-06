@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
-use std::env;
-use std::fs::{create_dir_all, read_dir};
+use config::read_config;
+use std::collections::hash_map::HashMap;
+use std::fs::{create_dir_all, read_dir, remove_file};
 use std::io::{ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -8,7 +9,11 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::process::Command;
 
+mod config;
+
 fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
+    let mut cached_filenames = HashMap::new();
+
     println!("Listing wallpapers at {:?}", wallpapers_dir);
     for dir_item in read_dir(wallpapers_dir).expect("Could not read wallpapers directory.") {
         let dir_item = dir_item.expect("Failed to unwrap directory");
@@ -31,6 +36,8 @@ fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
             .expect("Could not extract file stem.")
             .to_string_lossy();
         let cache_path = cache_dir.join(format!("{}.jpg", file_stem));
+
+        cached_filenames.insert(cache_path.clone(), true);
 
         if cache_path.exists() {
             println!(
@@ -67,6 +74,32 @@ fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
             })
             .wait()
             .expect("ffmpeg failed");
+    }
+
+    for dir_item in read_dir(cache_dir).expect("Could not read cache directory") {
+        let dir_item = dir_item.expect("Failed to unwrap directory");
+        let file_type = dir_item
+            .file_type()
+            .expect("Failed to get filetype from dir_item");
+
+        if !file_type.is_file() {
+            // Skip non-files
+            continue;
+        };
+
+        let file_path = dir_item.path();
+
+        // There is a wallpaper for this cache item
+        if cached_filenames.contains_key(&file_path) {
+            continue;
+        }
+
+        println!(
+            "Cache item {} has no wallpaper. Removing it.",
+            file_path.to_string_lossy()
+        );
+
+        remove_file(&file_path).expect("Failed to remove cached item");
     }
 }
 
@@ -151,9 +184,13 @@ struct Args {
     #[arg(short, long)]
     wallpapers_dir: Option<PathBuf>,
 
-    // The directory to store the thumbnails
-    #[arg(short, long)]
+    /// Where thumbnails are stored
+    #[arg(short = 'e', long)]
     cache_dir: Option<PathBuf>,
+
+    /// Where the configuration can be found
+    #[arg(short, long)]
+    config_dir: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -177,22 +214,22 @@ enum Commands {
 fn main() {
     let args = Args::parse();
 
-    let cache_dir = args.cache_dir.unwrap_or_else(|| {
-        let env_home = PathBuf::from(env::var("HOME").expect("No HOME env variable set."));
-        PathBuf::from(
-            env::var("XDG_CACHE_HOME").unwrap_or(format!("{}/.cache", env_home.to_string_lossy())),
-        )
-        .join("wallpapers-thumbnail")
-    });
+    let config = read_config(args.config_dir).unwrap();
+
+    let cache_dir = args.cache_dir.or(config.cache_dir).expect(&format!("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir"));
 
     if !cache_dir.is_dir() {
         create_dir_all(&cache_dir).expect("Failed to create cache directory");
     }
 
-    let wallpapers_dir = args.wallpapers_dir.unwrap_or_else(|| {
-        PathBuf::from(env::var("HOME").expect("Home environment variable not defined"))
-            .join("Wallpapers/live")
-    });
+    let wallpapers_dir = args
+        .wallpapers_dir
+        .or(config.wallpapers_dir)
+        .expect(&format!("Could not resolve the wallpapers directory. Provide it in the configuration file or through --cache-dir"));
+
+    if !wallpapers_dir.is_dir() {
+        panic!("Wallpapers directory does not exist");
+    }
 
     match &args.command {
         Commands::Daemon { socket_path } => daemonize(&socket_path),
