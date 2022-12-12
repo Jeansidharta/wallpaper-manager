@@ -1,138 +1,156 @@
 use clap::{Parser, Subcommand};
-use config::read_config;
+use config::{read_config, ConfigResolution};
 use std::collections::hash_map::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_file};
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::exit;
 use std::process::Command;
 
-mod config;
+use crate::ffmpeg::{generate_thumbnail, get_resolution, rescale_video};
 
-fn generate_thumbnails(wallpapers_dir: &PathBuf, cache_dir: &PathBuf) {
+mod config;
+mod ffmpeg;
+mod mpv;
+mod utils;
+
+fn try_generate_rescaled_wallpaper(
+    config_resolution: &ConfigResolution,
+    file_path: &PathBuf,
+    file_name: &str,
+    rescaled_path: &PathBuf,
+) {
+    let (width, height) = get_resolution(file_path).unwrap();
+    if width == config_resolution.width && height == config_resolution.height {
+        return;
+    }
+    if rescaled_path.is_file() {
+        return;
+    }
+    println!(
+        "Resolution {}x{} does not match for {}. Generating rescaled version...",
+        width, height, file_name,
+    );
+    rescale_video(
+        file_path,
+        config_resolution.width,
+        config_resolution.height,
+        &rescaled_path,
+    )
+    .unwrap();
+    println!("Rescaled version generated!");
+}
+
+fn try_generate_thumbnail_for_wallpaper(
+    file_path: &PathBuf,
+    file_name: &str,
+    thumbnail_path: &PathBuf,
+) -> bool {
+    if thumbnail_path.exists() {
+        println!("Thumbnail for file {} already exists", file_name);
+        return false;
+    }
+
+    println!("Missing thumbnail for file {}. Generating...", file_name,);
+    generate_thumbnail(file_path, &thumbnail_path).unwrap();
+    true
+}
+
+fn generate_cache(
+    config_resolution: &ConfigResolution,
+    wallpapers_dir: &PathBuf,
+    thumbnails_cache_dir: &PathBuf,
+    wallpapers_rescaled_dir: &PathBuf,
+) {
     let mut cached_filenames = HashMap::new();
+    let mut rescaled_wallpapers = HashMap::new();
 
     println!("Listing wallpapers at {:?}", wallpapers_dir);
     for dir_item in read_dir(wallpapers_dir).expect("Could not read wallpapers directory.") {
         let dir_item = dir_item.expect("Failed to unwrap directory");
-        let file_type = dir_item
-            .file_type()
-            .expect("Failed to get filetype from dir_item");
+        // Skip non-files
+        {
+            let file_type = dir_item
+                .file_type()
+                .expect("Failed to get filetype from dir_item");
 
-        if !file_type.is_file() {
-            // Skip non-files
-            continue;
-        };
+            if !file_type.is_file() {
+                continue;
+            };
+        }
 
         let file_path = dir_item.path();
-        let file_name = file_path
-            .file_name()
-            .expect("Failed to extract file name from path")
-            .to_string_lossy();
         let file_stem = file_path
             .file_stem()
             .expect("Could not extract file stem.")
             .to_string_lossy();
-        let cache_path = cache_dir.join(format!("{}.jpg", file_stem));
+        let file_name = file_path
+            .file_name()
+            .expect("Could not extract file name.")
+            .to_string_lossy();
 
-        cached_filenames.insert(cache_path.clone(), true);
+        let thumbnail_path = thumbnails_cache_dir.join(format!("{}.jpg", file_stem));
+        let rescaled_path = wallpapers_rescaled_dir.join(file_name.to_string());
 
-        if cache_path.exists() {
-            println!(
-                "Cache for file {} already exists",
-                file_path.file_name().unwrap().to_string_lossy()
-            );
-            continue;
-        }
+        try_generate_thumbnail_for_wallpaper(&file_path, &file_name, &thumbnail_path);
+        try_generate_rescaled_wallpaper(config_resolution, &file_path, &file_name, &rescaled_path);
 
-        println!("Missing cache for file {}. Generating...", file_name,);
-        Command::new("ffmpeg")
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                &file_path.to_string_lossy(),
-                "-ss",
-                "00:00:00.000",
-                "-vframes",
-                "1",
-                "-vf",
-                "scale=520:-1",
-                &*cache_path.to_string_lossy(),
-            ])
-            .spawn()
-            .unwrap_or_else(|err| match err.kind() {
-                ErrorKind::NotFound => {
-                    println!("ffmpeg binary not found");
-                    exit(-1);
-                }
-                _ => {
-                    println!("Could not start ffmpeg");
-                    exit(-1);
-                }
-            })
-            .wait()
-            .expect("ffmpeg failed");
+        cached_filenames.insert(thumbnail_path, true);
+        rescaled_wallpapers.insert(rescaled_path, true);
     }
 
-    for dir_item in read_dir(cache_dir).expect("Could not read cache directory") {
-        let dir_item = dir_item.expect("Failed to unwrap directory");
-        let file_type = dir_item
-            .file_type()
-            .expect("Failed to get filetype from dir_item");
+    let remove_unused_cache_files =
+        |path: &PathBuf,
+         dict: &HashMap<PathBuf, bool>,
+         remove_message_maker: fn(path: &PathBuf)| {
+            for dir_item in read_dir(path).expect("Could not read cache directory") {
+                let dir_item = dir_item.expect("Failed to unwrap directory");
+                // Skip non-files
+                {
+                    let file_type = dir_item
+                        .file_type()
+                        .expect("Failed to get filetype from dir_item");
 
-        if !file_type.is_file() {
-            // Skip non-files
-            continue;
+                    if !file_type.is_file() {
+                        continue;
+                    };
+                }
+
+                let file_path = dir_item.path();
+
+                // There is a wallpaper for this cache item
+                if dict.contains_key(&file_path) {
+                    continue;
+                }
+
+                remove_message_maker(&file_path);
+
+                remove_file(&file_path).expect("Failed to remove cached item");
+            }
         };
-
-        let file_path = dir_item.path();
-
-        // There is a wallpaper for this cache item
-        if cached_filenames.contains_key(&file_path) {
-            continue;
-        }
-
+    remove_unused_cache_files(thumbnails_cache_dir, &cached_filenames, |path| {
         println!(
-            "Cache item {} has no wallpaper. Removing it.",
-            file_path.to_string_lossy()
-        );
-
-        remove_file(&file_path).expect("Failed to remove cached item");
-    }
+            "Thumbnail named {} has no wallpaper. Removing it.",
+            path.to_string_lossy()
+        )
+    });
+    remove_unused_cache_files(wallpapers_rescaled_dir, &rescaled_wallpapers, |path| {
+        println!(
+            "Rescaled wallpaper named {} has no wallpaper. Removing it.",
+            path.to_string_lossy()
+        )
+    });
 }
 
-fn daemonize(socket_path: &PathBuf) {
-    Command::new("xwinwrap")
-        .args([
-            "-ov",
-            "-b",
-            "-fs",
-            "-g",
-            "1920x1080+0+0",
-            "--",
-            "mpv",
-            "-wid",
-            "WID",
-            "--idle=",
-            "--no-osc",
-            "--no-osd-bar",
-            "--loop-file",
-            "--player-operation-mode=cplayer",
-            "--no-audio",
-            "--panscan=1.0",
-            "--no-input-default-bindings",
-            &format!("--input-ipc-server={}", socket_path.to_string_lossy()),
-        ])
-        .exec();
-}
-
-fn select_wallpaper(wallpapers_dir: &PathBuf, cache_dir: &PathBuf, socket_path: &PathBuf) {
+fn select_wallpaper(
+    wallpapers_dir: &PathBuf,
+    wallpapers_rescaled_dir: &PathBuf,
+    thumbnails_cache_dir: &PathBuf,
+    socket_path: &PathBuf,
+) {
+    println!("{}", thumbnails_cache_dir.to_string_lossy());
     let sxiv_stdout = Command::new("sxiv")
-        .args(["-t", "-o", &cache_dir.to_string_lossy()])
+        .args(["-t", "-o", &thumbnails_cache_dir.to_string_lossy()])
         .output()
         .expect("Failed to execute sxiv")
         .stdout;
@@ -153,29 +171,37 @@ fn select_wallpaper(wallpapers_dir: &PathBuf, cache_dir: &PathBuf, socket_path: 
     let selected_file_stem = selected_path
         .file_stem()
         .expect("Selected wallpaper has no stem");
-    for dir_entry in read_dir(wallpapers_dir).expect("Failed to read wallpapers dir") {
-        let dir_entry = dir_entry.expect("Wallpaper dir entry failed for an unexpected reason.");
-        let dir_entry_path = dir_entry.path();
-        let dir_entry_stem = dir_entry_path
-            .file_stem()
-            .expect("Failedto get wallpaper dir entry file stem");
-        if dir_entry_stem == selected_file_stem {
-            let mut socket_stream =
-                UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
 
-            let payload = format!(
-                "{{ \"command\": [\"loadfile\", \"{}\"] }}\n",
-                dir_entry_path.to_string_lossy()
-            );
+    let find_wallpaper_path = |dir: &PathBuf| -> Option<PathBuf> {
+        for dir_entry in read_dir(dir).expect("Failed to read wallpapers dir") {
+            let dir_entry_path = dir_entry
+                .expect("Wallpaper dir entry failed for an unexpected reason.")
+                .path();
+            let dir_entry_stem = dir_entry_path
+                .file_stem()
+                .expect("Failed to get wallpaper dir entry file stem");
+            if dir_entry_stem == selected_file_stem {
+                return Some(dir_entry_path.clone());
+            };
+        }
+        None
+    };
 
-            socket_stream
-                .write_all(&payload.bytes().collect::<Vec<u8>>())
-                .expect("Failed to write to MPV socket.");
-            return;
-        };
-    }
+    let path = find_wallpaper_path(wallpapers_rescaled_dir)
+        .or_else(|| find_wallpaper_path(wallpapers_dir))
+        .expect("Could not find corresponding wallpaper");
 
-    panic!("Failed to find a wallpaper that corresponds to the cached file. Is the cache stale?");
+    let mut socket_stream =
+        UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
+
+    let payload = format!(
+        "{{ \"command\": [\"loadfile\", \"{}\"] }}\n",
+        path.to_string_lossy()
+    );
+
+    socket_stream
+        .write_all(&payload.bytes().collect::<Vec<u8>>())
+        .expect("Failed to write to MPV socket.");
 }
 
 /// Program to manage my personal wallpapers
@@ -186,7 +212,7 @@ struct Args {
     #[arg(short, long)]
     wallpapers_dir: Option<PathBuf>,
 
-    /// Where thumbnails are stored
+    /// Where tciwhumbnails and resaized wallpapers are stored
     #[arg(short = 'e', long)]
     cache_dir: Option<PathBuf>,
 
@@ -205,7 +231,7 @@ enum Commands {
         #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         socket_path: PathBuf,
     },
-    GenerateThumbnails {},
+    GenerateCache {},
     SelectWallpaper {
         // The path to the MPV socket. Defaults to /tmp/wallpaper-mpv-socket
         #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
@@ -218,26 +244,43 @@ fn main() {
 
     let config = read_config(args.config_dir).unwrap();
 
-    let cache_dir = args.cache_dir.or(config.cache_dir).expect(&format!("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir"));
-
-    if !cache_dir.is_dir() {
-        create_dir_all(&cache_dir).expect("Failed to create cache directory");
-    }
+    let cache_dir = args.cache_dir
+        .or(config.cache_dir)
+        .expect(&format!("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir"));
 
     let wallpapers_dir = args
         .wallpapers_dir
         .or(config.wallpapers_dir)
         .expect(&format!("Could not resolve the wallpapers directory. Provide it in the configuration file or through --cache-dir"));
 
+    let thumbnails_cache_dir = cache_dir.join("wallpapers-thumbnail");
+    let wallpapers_rescaled_dir = cache_dir.join("wallpapers-rescaled");
+
+    if !thumbnails_cache_dir.is_dir() {
+        create_dir_all(&thumbnails_cache_dir).expect("Failed to create thumbnails cache directory");
+    }
+    if !wallpapers_rescaled_dir.is_dir() {
+        create_dir_all(&wallpapers_rescaled_dir)
+            .expect("Failed to create wallpapers rescaled cache directory");
+    }
+
     if !wallpapers_dir.is_dir() {
         panic!("Wallpapers directory does not exist");
     }
 
     match &args.command {
-        Commands::Daemon { socket_path } => daemonize(&socket_path),
-        Commands::GenerateThumbnails {} => generate_thumbnails(&wallpapers_dir, &cache_dir),
-        Commands::SelectWallpaper { socket_path } => {
-            select_wallpaper(&wallpapers_dir, &cache_dir, &socket_path)
-        }
+        Commands::Daemon { socket_path } => mpv::run(&socket_path),
+        Commands::GenerateCache {} => generate_cache(
+            &config.resolution.unwrap_or(ConfigResolution::default()),
+            &wallpapers_dir,
+            &thumbnails_cache_dir,
+            &wallpapers_rescaled_dir,
+        ),
+        Commands::SelectWallpaper { socket_path } => select_wallpaper(
+            &wallpapers_dir,
+            &wallpapers_rescaled_dir,
+            &thumbnails_cache_dir,
+            &socket_path,
+        ),
     }
 }

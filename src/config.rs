@@ -14,6 +14,13 @@ pub struct Config {
     pub wallpapers_dir: Option<PathBuf>,
     pub cache_dir: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
+    pub resolution: Option<ConfigResolution>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConfigResolution {
+    pub width: i32,
+    pub height: i32,
 }
 
 impl Default for Config {
@@ -22,6 +29,16 @@ impl Default for Config {
             wallpapers_dir: None,
             cache_dir: None,
             socket_path: None,
+            resolution: None,
+        }
+    }
+}
+
+impl Default for ConfigResolution {
+    fn default() -> Self {
+        ConfigResolution {
+            width: 1920,
+            height: 1080,
         }
     }
 }
@@ -107,11 +124,7 @@ pub fn read_config(custom_config_path: Option<PathBuf>) -> Result<Config, String
 
     if !config_path.is_file() {
         if let Answer::YES = Question::new(&format!("Could not find a configuration file at {}. Would you like to create a default configuration at this location?", config_path.to_string_lossy())).confirm() {
-            Config {
-                wallpapers_dir: None,
-                cache_dir: None,
-                socket_path: None,
-            }.write(&config_path)?;
+            Config::default().write(&config_path)?;
             println!("Default configuration file created successfuly")
         }
         std::process::exit(0)
