@@ -1,3 +1,5 @@
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::{path::PathBuf, process::Command};
 
@@ -24,4 +26,18 @@ pub fn run(socket_path: &PathBuf) {
             &format!("--input-ipc-server={}", socket_path.to_string_lossy()),
         ])
         .exec();
+}
+
+pub fn load_file(socket_path: &PathBuf, image_path: &PathBuf) {
+    let mut socket_stream =
+        UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
+
+    let payload = format!(
+        "{{ \"command\": [\"loadfile\", \"{}\"] }}\n",
+        image_path.to_string_lossy()
+    );
+
+    socket_stream
+        .write_all(&payload.bytes().collect::<Vec<u8>>())
+        .expect("Failed to write to MPV socket.");
 }

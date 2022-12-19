@@ -2,17 +2,28 @@ use clap::{Parser, Subcommand};
 use config::{read_config, ConfigResolution};
 use std::collections::hash_map::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_file};
-use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::Command;
 
 use crate::ffmpeg::{generate_thumbnail, get_resolution, rescale_video};
 
 mod config;
 mod ffmpeg;
 mod mpv;
+mod sxiv;
 mod utils;
+
+trait PrintableError<T> {
+    fn print_and_exit(self) -> T;
+}
+
+impl<T> PrintableError<T> for Result<T, String> {
+    fn print_and_exit(self) -> T {
+        self.unwrap_or_else(|s| {
+            println!("{}", s);
+            std::process::exit(-1);
+        })
+    }
+}
 
 fn try_generate_rescaled_wallpaper(
     config_resolution: &ConfigResolution,
@@ -20,7 +31,7 @@ fn try_generate_rescaled_wallpaper(
     file_name: &str,
     rescaled_path: &PathBuf,
 ) {
-    let (width, height) = get_resolution(file_path).unwrap();
+    let (width, height) = get_resolution(file_path).print_and_exit();
     if width == config_resolution.width && height == config_resolution.height {
         return;
     }
@@ -37,7 +48,7 @@ fn try_generate_rescaled_wallpaper(
         config_resolution.height,
         &rescaled_path,
     )
-    .unwrap();
+    .print_and_exit();
     println!("Rescaled version generated!");
 }
 
@@ -52,7 +63,7 @@ fn try_generate_thumbnail_for_wallpaper(
     }
 
     println!("Missing thumbnail for file {}. Generating...", file_name,);
-    generate_thumbnail(file_path, &thumbnail_path).unwrap();
+    generate_thumbnail(file_path, &thumbnail_path).print_and_exit();
     true
 }
 
@@ -147,25 +158,20 @@ fn select_wallpaper(
     wallpapers_rescaled_dir: &PathBuf,
     thumbnails_cache_dir: &PathBuf,
     socket_path: &PathBuf,
+    is_static: bool,
 ) {
     println!("{}", thumbnails_cache_dir.to_string_lossy());
-    let sxiv_stdout = Command::new("sxiv")
-        .args(["-t", "-o", &thumbnails_cache_dir.to_string_lossy()])
-        .output()
-        .expect("Failed to execute sxiv")
-        .stdout;
+    let selected_path = sxiv::ask_user_input_single(if is_static {
+        wallpapers_dir
+    } else {
+        thumbnails_cache_dir
+    })
+    .print_and_exit();
 
-    let sxiv_stdout = String::from_utf8(sxiv_stdout).expect("sxiv output is not valid utf8");
-
-    let selected_wallpaper = sxiv_stdout
-        .split('\n')
-        .next()
-        .expect("No wallpaper selected.");
-
-    let selected_path = PathBuf::from(selected_wallpaper);
     let selected_file_name = selected_path
         .file_name()
-        .expect("Selected wallpaper has no name");
+        .ok_or_else(|| "Selected wallpaper has no name".to_string())
+        .print_and_exit();
 
     println!("Selected \"{}\"", selected_file_name.to_string_lossy());
     let selected_file_stem = selected_path
@@ -181,7 +187,7 @@ fn select_wallpaper(
                 .file_stem()
                 .expect("Failed to get wallpaper dir entry file stem");
             if dir_entry_stem == selected_file_stem {
-                return Some(dir_entry_path.clone());
+                return Some(dir_entry_path);
             };
         }
         None
@@ -191,17 +197,7 @@ fn select_wallpaper(
         .or_else(|| find_wallpaper_path(wallpapers_dir))
         .expect("Could not find corresponding wallpaper");
 
-    let mut socket_stream =
-        UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
-
-    let payload = format!(
-        "{{ \"command\": [\"loadfile\", \"{}\"] }}\n",
-        path.to_string_lossy()
-    );
-
-    socket_stream
-        .write_all(&payload.bytes().collect::<Vec<u8>>())
-        .expect("Failed to write to MPV socket.");
+    mpv::load_file(socket_path, &path)
 }
 
 /// Program to manage my personal wallpapers
@@ -236,13 +232,17 @@ enum Commands {
         // The path to the MPV socket. Defaults to /tmp/wallpaper-mpv-socket
         #[arg(short, long, default_value = "/tmp/wallpaper-mpv-socket")]
         socket_path: PathBuf,
+
+        // If provided, will atempt to load the result as a static image.
+        #[arg(short = 'c', long = "static")]
+        static_image: bool,
     },
 }
 
 fn main() {
     let args = Args::parse();
 
-    let config = read_config(args.config_dir).unwrap();
+    let config = read_config(args.config_dir).print_and_exit();
 
     let cache_dir = args.cache_dir
         .or(config.cache_dir)
@@ -276,11 +276,15 @@ fn main() {
             &thumbnails_cache_dir,
             &wallpapers_rescaled_dir,
         ),
-        Commands::SelectWallpaper { socket_path } => select_wallpaper(
+        Commands::SelectWallpaper {
+            socket_path,
+            static_image,
+        } => select_wallpaper(
             &wallpapers_dir,
             &wallpapers_rescaled_dir,
             &thumbnails_cache_dir,
             &socket_path,
+            *static_image,
         ),
     }
 }
