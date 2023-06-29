@@ -245,7 +245,7 @@ fn main() {
     let config = read_config(args.config_dir).print_and_exit();
 
     let cache_dir = args.cache_dir
-        .or(config.cache_dir)
+        .or(dirs::cache_dir())
         .expect(&format!("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir"));
 
     let wallpapers_dir = args

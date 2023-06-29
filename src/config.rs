@@ -1,13 +1,9 @@
 use question::{Answer, Question};
 use serde_derive::{Deserialize, Serialize};
-use std::env;
 use std::fs::{create_dir_all, read_to_string, write};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use toml;
-
-const ENV_VAR_XDG_CONFIG_DIR: &str = "XDG_CONFIG_HOME";
-const ENV_VAR_HOME: &str = "HOME";
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Config {
@@ -97,26 +93,13 @@ impl Config {
         toml::from_str(&config_contents)
             .or_else(|e| Err(format!("could not parse configuration file. Error: {e}")))
     }
-
-    pub fn resolve_config_path_from_env() -> Result<PathBuf, ()> {
-        let config_dir: PathBuf = match env::var(ENV_VAR_XDG_CONFIG_DIR) {
-            Ok(v) => PathBuf::from(v),
-            Err(_) => match env::var(ENV_VAR_HOME) {
-                Ok(i) => PathBuf::from(i).join(".config"),
-                Err(_) => return Err(()),
-            },
-        };
-
-        Ok(config_dir.join("wallpaper-manager/config.toml"))
-    }
 }
 
-pub fn read_config(custom_config_path: Option<PathBuf>) -> Result<Config, String> {
+pub fn read_config(cli_config_path: Option<PathBuf>) -> Result<Config, String> {
     let config_path =
-        custom_config_path
-            .ok_or(Err(()))
-            .or_else(|_: Result<PathBuf, ()>| Config::resolve_config_path_from_env())
-            .or_else(|_| Err(format!("Could not resolve the config directory. Either provide it as a command line argument (through --config-dir), or set either the {ENV_VAR_XDG_CONFIG_DIR} or {ENV_VAR_HOME} environment variables")))?;
+        cli_config_path
+            .ok_or(dirs::config_dir())
+            .or_else(|_| Err(format!("Could not resolve the config directory. Either provide it as a command line argument (through --config-dir), or set either the XDG_CONFIG_HOME or HOME environment variables")))?.join("wallpaper-manager/config.toml");
 
     if !config_path.is_file() {
         if let Answer::YES = Question::new(&format!("Could not find a configuration file at {}. Would you like to create a default configuration at this location?", config_path.to_string_lossy())).confirm() {
