@@ -269,7 +269,11 @@ fn main() {
     }
 
     match &args.command {
-        Commands::Daemon { socket_path } => mpv::run(&socket_path),
+        Commands::Daemon { socket_path } => mpv::run(
+            &socket_path,
+            config.resolution.unwrap_or_default(),
+            config.offset.unwrap_or_default(),
+        ),
         Commands::GenerateCache {} => generate_cache(
             &config.resolution.unwrap_or(ConfigResolution::default()),
             &wallpapers_dir,

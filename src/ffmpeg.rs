@@ -2,7 +2,7 @@ use crate::utils::{make_error_message_after_command_call, trim_string};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub fn get_resolution(file_path: &PathBuf) -> Result<(i32, i32), String> {
+pub fn get_resolution(file_path: &PathBuf) -> Result<(u32, u32), String> {
     let resolution: String = Command::new("ffprobe")
         .args([
             "-v",
@@ -47,8 +47,8 @@ pub fn get_resolution(file_path: &PathBuf) -> Result<(i32, i32), String> {
 
 pub fn rescale_video(
     original_video_path: &PathBuf,
-    new_width: i32,
-    new_height: i32,
+    new_width: u32,
+    new_height: u32,
     new_video_path: &PathBuf,
 ) -> Result<(), String> {
     Command::new("ffmpeg")

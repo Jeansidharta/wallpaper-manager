@@ -9,29 +9,25 @@ use toml;
 const ENV_VAR_XDG_CONFIG_DIR: &str = "XDG_CONFIG_HOME";
 const ENV_VAR_HOME: &str = "HOME";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Config {
     pub wallpapers_dir: Option<PathBuf>,
     pub cache_dir: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     pub resolution: Option<ConfigResolution>,
+    pub offset: Option<ConfigOffset>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ConfigResolution {
-    pub width: i32,
-    pub height: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            wallpapers_dir: None,
-            cache_dir: None,
-            socket_path: None,
-            resolution: None,
-        }
-    }
+#[derive(Serialize, Deserialize, Default)]
+pub struct ConfigOffset {
+    pub x: i32,
+    pub y: i32,
 }
 
 impl Default for ConfigResolution {
