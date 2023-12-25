@@ -1,43 +1,36 @@
-use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::{path::PathBuf, process::Command};
+use std::process::Command;
+use std::{io::Write, path::Path};
 
-use crate::config::{ConfigOffset, ConfigResolution};
+pub fn run(socket_path: &Path) -> anyhow::Result<()> {
+    let exec = Command::new("xwinwrap")
+        .args([
+            "-ov",
+            "-b",
+            "-fs",
+            "-g",
+            "1920x1080+0+0",
+            "--",
+            "mpv",
+            "-wid",
+            "WID",
+            "--idle=",
+            "--no-osc",
+            "--no-osd-bar",
+            "--loop-file",
+            "--player-operation-mode=cplayer",
+            "--no-audio",
+            "--panscan=1.0",
+            "--no-input-default-bindings",
+            &format!("--input-ipc-server={}", socket_path.to_string_lossy()),
+        ])
+        .exec();
 
-pub fn run(socket_path: &PathBuf, resolution: ConfigResolution, offset: ConfigOffset) {
-    let mut command = Command::new("xwinwrap");
-
-    command.args([
-        "-ov",
-        "-b",
-        "-fs",
-        "-ni",
-        "-un",
-        "-g",
-        &format!(
-            "{}x{}{:+}{:+}",
-            resolution.width, resolution.height, offset.x, offset.y
-        ),
-        "--",
-        "mpv",
-        "-wid",
-        "WID",
-        "--idle=",
-        "--no-osc",
-        "--no-osd-bar",
-        "--loop-file",
-        "--player-operation-mode=cplayer",
-        "--no-audio",
-        "--panscan=1.0",
-        "--no-input-default-bindings",
-        &format!("--input-ipc-server={}", socket_path.to_string_lossy()),
-    ]);
-    println!("xwinwrap command: {:?}", command);
-    command.exec();
+    Err(exec)?
 }
 
-pub fn load_file(socket_path: &PathBuf, image_path: &PathBuf) {
+pub fn load_file(socket_path: &Path, image_path: &Path) {
     let mut socket_stream =
         UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
 

@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.76"
 clap = { version = "4.0.2", features = ["derive"] }
 dirs = "5.0.1"
 question = "0.2.2"
 serde = "1.0.149"
 serde_derive = "1.0.149"
+thiserror = "1.0.51"
 toml = "0.5.9"

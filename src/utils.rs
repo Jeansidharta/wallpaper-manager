@@ -10,12 +10,15 @@ pub fn make_error_message_after_command_call(command_name: &str, err: Error) -> 
 pub fn trim_string(s: &mut String) -> &mut String {
     s.chars()
         .position(|c| c != ' ' && c != '\n' && c != '\t')
-        .and_then(|index| Some(s.drain(0..index)));
+        .map(|index| s.drain(0..index));
 
-    s.chars()
+    if let Some(index) = s
+        .chars()
         .rev()
         .position(|c| c != ' ' && c != '\n' && c != '\t')
-        .and_then(|index| Some(s.truncate(s.len() - index)));
+    {
+        s.truncate(s.len() - index)
+    }
 
-    return s;
+    s
 }
