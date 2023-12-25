@@ -1,8 +1,9 @@
-use clap::{Parser, Subcommand};
-use config::{read_config, ConfigResolution};
-use std::fs::{create_dir_all, read_dir, remove_file};
+use std::fs::{read_dir, remove_file};
 use std::path::PathBuf;
 use std::{collections::hash_map::HashMap, path::Path};
+
+use clap::{Parser, Subcommand};
+use config::{read_config, Config, ConfigResolution};
 
 use crate::ffmpeg::{generate_thumbnail, get_resolution, rescale_video};
 
@@ -67,17 +68,13 @@ fn try_generate_thumbnail_for_wallpaper(
     true
 }
 
-fn generate_cache(
-    config_resolution: &ConfigResolution,
-    wallpapers_dir: &PathBuf,
-    thumbnails_cache_dir: &Path,
-    wallpapers_rescaled_dir: &Path,
-) {
+fn generate_cache(config: &Config) {
     let mut cached_filenames = HashMap::new();
     let mut rescaled_wallpapers = HashMap::new();
 
-    println!("Listing wallpapers at {:?}", wallpapers_dir);
-    for dir_item in read_dir(wallpapers_dir).expect("Could not read wallpapers directory.") {
+    println!("Listing wallpapers at {:?}", config.wallpapers_dir);
+    for dir_item in read_dir(&config.wallpapers_dir).expect("Could not read wallpapers directory.")
+    {
         let dir_item = dir_item.expect("Failed to unwrap directory");
         // Skip non-files
         {
@@ -100,11 +97,13 @@ fn generate_cache(
             .expect("Could not extract file name.")
             .to_string_lossy();
 
-        let thumbnail_path = thumbnails_cache_dir.join(format!("{}.jpg", file_stem));
-        let rescaled_path = wallpapers_rescaled_dir.join(file_name.to_string());
+        let thumbnail_path = config
+            .thumbnails_cache_dir
+            .join(format!("{}.jpg", file_stem));
+        let rescaled_path = config.wallpapers_rescaled_dir.join(file_name.to_string());
 
         try_generate_thumbnail_for_wallpaper(&file_path, &file_name, &thumbnail_path);
-        try_generate_rescaled_wallpaper(config_resolution, &file_path, &file_name, &rescaled_path);
+        try_generate_rescaled_wallpaper(&config.resolution, &file_path, &file_name, &rescaled_path);
 
         cached_filenames.insert(thumbnail_path, true);
         rescaled_wallpapers.insert(rescaled_path, true);
@@ -137,32 +136,30 @@ fn generate_cache(
                 remove_file(&file_path).expect("Failed to remove cached item");
             }
         };
-    remove_unused_cache_files(thumbnails_cache_dir, &cached_filenames, |path| {
+    remove_unused_cache_files(&config.thumbnails_cache_dir, &cached_filenames, |path| {
         println!(
             "Thumbnail named {} has no wallpaper. Removing it.",
             path.to_string_lossy()
         )
     });
-    remove_unused_cache_files(wallpapers_rescaled_dir, &rescaled_wallpapers, |path| {
-        println!(
-            "Rescaled wallpaper named {} has no wallpaper. Removing it.",
-            path.to_string_lossy()
-        )
-    });
+    remove_unused_cache_files(
+        &config.wallpapers_rescaled_dir,
+        &rescaled_wallpapers,
+        |path| {
+            println!(
+                "Rescaled wallpaper named {} has no wallpaper. Removing it.",
+                path.to_string_lossy()
+            )
+        },
+    );
 }
 
-fn select_wallpaper(
-    wallpapers_dir: &PathBuf,
-    wallpapers_rescaled_dir: &Path,
-    thumbnails_cache_dir: &Path,
-    socket_path: &Path,
-    is_static: bool,
-) {
-    println!("{}", thumbnails_cache_dir.to_string_lossy());
+fn select_wallpaper(config: &Config, socket_path: &Path, is_static: bool) {
+    println!("{}", config.thumbnails_cache_dir.to_string_lossy());
     let selected_path = sxiv::ask_user_input_single(if is_static {
-        wallpapers_dir
+        &config.wallpapers_dir
     } else {
-        thumbnails_cache_dir
+        &config.thumbnails_cache_dir
     })
     .print_and_exit();
 
@@ -191,8 +188,8 @@ fn select_wallpaper(
         None
     };
 
-    let path = find_wallpaper_path(wallpapers_rescaled_dir)
-        .or_else(|| find_wallpaper_path(wallpapers_dir))
+    let path = find_wallpaper_path(&config.wallpapers_rescaled_dir)
+        .or_else(|| find_wallpaper_path(&config.wallpapers_dir))
         .expect("Could not find corresponding wallpaper");
 
     mpv::load_file(socket_path, &path)
@@ -237,52 +234,19 @@ enum Commands {
     },
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let config = read_config(args.config_dir).print_and_exit();
-
-    let cache_dir = args.cache_dir
-        .or(config.cache_dir)
-        .expect("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir");
-
-    let wallpapers_dir = args
-        .wallpapers_dir
-        .or(config.wallpapers_dir)
-        .expect("Could not resolve the wallpapers directory. Provide it in the configuration file or through --cache-dir");
-
-    let thumbnails_cache_dir = cache_dir.join("wallpapers-thumbnail");
-    let wallpapers_rescaled_dir = cache_dir.join("wallpapers-rescaled");
-
-    if !thumbnails_cache_dir.is_dir() {
-        create_dir_all(&thumbnails_cache_dir).expect("Failed to create thumbnails cache directory");
-    }
-    if !wallpapers_rescaled_dir.is_dir() {
-        create_dir_all(&wallpapers_rescaled_dir)
-            .expect("Failed to create wallpapers rescaled cache directory");
-    }
-
-    if !wallpapers_dir.is_dir() {
-        panic!("Wallpapers directory does not exist");
-    }
+    let config = read_config(&args)?;
 
     match &args.command {
-        Commands::Daemon { socket_path } => mpv::run(socket_path),
-        Commands::GenerateCache {} => generate_cache(
-            &config.resolution.unwrap_or(ConfigResolution::default()),
-            &wallpapers_dir,
-            &thumbnails_cache_dir,
-            &wallpapers_rescaled_dir,
-        ),
+        Commands::Daemon { socket_path } => mpv::run(socket_path)?,
+        Commands::GenerateCache {} => generate_cache(&config),
         Commands::SelectWallpaper {
             socket_path,
             static_image,
-        } => select_wallpaper(
-            &wallpapers_dir,
-            &wallpapers_rescaled_dir,
-            &thumbnails_cache_dir,
-            socket_path,
-            *static_image,
-        ),
-    }
+        } => select_wallpaper(&config, socket_path, *static_image),
+    };
+
+    Ok(())
 }

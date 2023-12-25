@@ -3,8 +3,8 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::{io::Write, path::Path};
 
-pub fn run(socket_path: &Path) {
-    Command::new("xwinwrap")
+pub fn run(socket_path: &Path) -> anyhow::Result<()> {
+    let exec = Command::new("xwinwrap")
         .args([
             "-ov",
             "-b",
@@ -26,6 +26,8 @@ pub fn run(socket_path: &Path) {
             &format!("--input-ipc-server={}", socket_path.to_string_lossy()),
         ])
         .exec();
+
+    Err(exec)?
 }
 
 pub fn load_file(socket_path: &Path, image_path: &Path) {
