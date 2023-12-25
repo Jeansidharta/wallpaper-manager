@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use config::{read_config, ConfigResolution};
-use std::collections::hash_map::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_file};
 use std::path::PathBuf;
+use std::{collections::hash_map::HashMap, path::Path};
 
 use crate::ffmpeg::{generate_thumbnail, get_resolution, rescale_video};
 
@@ -27,9 +27,9 @@ impl<T> PrintableError<T> for Result<T, String> {
 
 fn try_generate_rescaled_wallpaper(
     config_resolution: &ConfigResolution,
-    file_path: &PathBuf,
+    file_path: &Path,
     file_name: &str,
-    rescaled_path: &PathBuf,
+    rescaled_path: &Path,
 ) {
     let (width, height) = get_resolution(file_path).print_and_exit();
     if width == config_resolution.width && height == config_resolution.height {
@@ -46,16 +46,16 @@ fn try_generate_rescaled_wallpaper(
         file_path,
         config_resolution.width,
         config_resolution.height,
-        &rescaled_path,
+        rescaled_path,
     )
     .print_and_exit();
     println!("Rescaled version generated!");
 }
 
 fn try_generate_thumbnail_for_wallpaper(
-    file_path: &PathBuf,
+    file_path: &Path,
     file_name: &str,
-    thumbnail_path: &PathBuf,
+    thumbnail_path: &Path,
 ) -> bool {
     if thumbnail_path.exists() {
         println!("Thumbnail for file {} already exists", file_name);
@@ -63,15 +63,15 @@ fn try_generate_thumbnail_for_wallpaper(
     }
 
     println!("Missing thumbnail for file {}. Generating...", file_name,);
-    generate_thumbnail(file_path, &thumbnail_path).print_and_exit();
+    generate_thumbnail(file_path, thumbnail_path).print_and_exit();
     true
 }
 
 fn generate_cache(
     config_resolution: &ConfigResolution,
     wallpapers_dir: &PathBuf,
-    thumbnails_cache_dir: &PathBuf,
-    wallpapers_rescaled_dir: &PathBuf,
+    thumbnails_cache_dir: &Path,
+    wallpapers_rescaled_dir: &Path,
 ) {
     let mut cached_filenames = HashMap::new();
     let mut rescaled_wallpapers = HashMap::new();
@@ -111,9 +111,7 @@ fn generate_cache(
     }
 
     let remove_unused_cache_files =
-        |path: &PathBuf,
-         dict: &HashMap<PathBuf, bool>,
-         remove_message_maker: fn(path: &PathBuf)| {
+        |path: &Path, dict: &HashMap<PathBuf, bool>, remove_message_maker: fn(path: &PathBuf)| {
             for dir_item in read_dir(path).expect("Could not read cache directory") {
                 let dir_item = dir_item.expect("Failed to unwrap directory");
                 // Skip non-files
@@ -155,9 +153,9 @@ fn generate_cache(
 
 fn select_wallpaper(
     wallpapers_dir: &PathBuf,
-    wallpapers_rescaled_dir: &PathBuf,
-    thumbnails_cache_dir: &PathBuf,
-    socket_path: &PathBuf,
+    wallpapers_rescaled_dir: &Path,
+    thumbnails_cache_dir: &Path,
+    socket_path: &Path,
     is_static: bool,
 ) {
     println!("{}", thumbnails_cache_dir.to_string_lossy());
@@ -178,7 +176,7 @@ fn select_wallpaper(
         .file_stem()
         .expect("Selected wallpaper has no stem");
 
-    let find_wallpaper_path = |dir: &PathBuf| -> Option<PathBuf> {
+    let find_wallpaper_path = |dir: &Path| -> Option<PathBuf> {
         for dir_entry in read_dir(dir).expect("Failed to read wallpapers dir") {
             let dir_entry_path = dir_entry
                 .expect("Wallpaper dir entry failed for an unexpected reason.")
@@ -246,12 +244,12 @@ fn main() {
 
     let cache_dir = args.cache_dir
         .or(config.cache_dir)
-        .expect(&format!("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir"));
+        .expect("Could not resolve the cache directory. Provide it in the configuration file or through --cache-dir");
 
     let wallpapers_dir = args
         .wallpapers_dir
         .or(config.wallpapers_dir)
-        .expect(&format!("Could not resolve the wallpapers directory. Provide it in the configuration file or through --cache-dir"));
+        .expect("Could not resolve the wallpapers directory. Provide it in the configuration file or through --cache-dir");
 
     let thumbnails_cache_dir = cache_dir.join("wallpapers-thumbnail");
     let wallpapers_rescaled_dir = cache_dir.join("wallpapers-rescaled");
@@ -269,7 +267,7 @@ fn main() {
     }
 
     match &args.command {
-        Commands::Daemon { socket_path } => mpv::run(&socket_path),
+        Commands::Daemon { socket_path } => mpv::run(socket_path),
         Commands::GenerateCache {} => generate_cache(
             &config.resolution.unwrap_or(ConfigResolution::default()),
             &wallpapers_dir,
@@ -283,7 +281,7 @@ fn main() {
             &wallpapers_dir,
             &wallpapers_rescaled_dir,
             &thumbnails_cache_dir,
-            &socket_path,
+            socket_path,
             *static_image,
         ),
     }

@@ -1,8 +1,8 @@
 use crate::utils::{make_error_message_after_command_call, trim_string};
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-pub fn get_resolution(file_path: &PathBuf) -> Result<(i32, i32), String> {
+pub fn get_resolution(file_path: &Path) -> Result<(i32, i32), String> {
     let resolution: String = Command::new("ffprobe")
         .args([
             "-v",
@@ -17,9 +17,9 @@ pub fn get_resolution(file_path: &PathBuf) -> Result<(i32, i32), String> {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .or_else(|err| Err(make_error_message_after_command_call("ffprobe", err)))?
+        .map_err(|err| make_error_message_after_command_call("ffprobe", err))?
         .wait_with_output()
-        .or_else(|_| Err("ffprobe failed".to_string()))?
+        .map_err(|_| "ffprobe failed".to_string())?
         .stdout
         .into_iter()
         .map(|c| c as char)
@@ -38,18 +38,18 @@ pub fn get_resolution(file_path: &PathBuf) -> Result<(i32, i32), String> {
     trim_string(&mut height_string);
     let width = trim_string(&mut width_string)
         .parse()
-        .or_else(|_| Err("Failed to parse width string".to_string()))?;
+        .map_err(|_| "Failed to parse width string".to_string())?;
     let height = trim_string(&mut height_string)
         .parse()
-        .or_else(|_| Err("Failed to parse height string".to_string()))?;
+        .map_err(|_| "Failed to parse height string".to_string())?;
     Ok((width, height))
 }
 
 pub fn rescale_video(
-    original_video_path: &PathBuf,
+    original_video_path: &Path,
     new_width: i32,
     new_height: i32,
-    new_video_path: &PathBuf,
+    new_video_path: &Path,
 ) -> Result<(), String> {
     Command::new("ffmpeg")
         .args([
@@ -63,17 +63,14 @@ pub fn rescale_video(
             &new_video_path.to_string_lossy(),
         ])
         .spawn()
-        .or_else(|err| Err(make_error_message_after_command_call("ffmpeg", err)))?
+        .map_err(|err| make_error_message_after_command_call("ffmpeg", err))?
         .wait()
-        .or_else(|_| Err("ffmpeg failed".to_string()))?;
+        .map_err(|_| "ffmpeg failed".to_string())?;
 
     Ok(())
 }
 
-pub fn generate_thumbnail(
-    original_video_path: &PathBuf,
-    thumbnail_path: &PathBuf,
-) -> Result<(), String> {
+pub fn generate_thumbnail(original_video_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
     Command::new("ffmpeg")
         .args([
             "-hide_banner",
@@ -90,9 +87,9 @@ pub fn generate_thumbnail(
             &*thumbnail_path.to_string_lossy(),
         ])
         .spawn()
-        .or_else(|err| Err(make_error_message_after_command_call("ffmpeg", err)))?
+        .map_err(|err| make_error_message_after_command_call("ffmpeg", err))?
         .wait()
-        .or_else(|_| Err("ffmpeg failed".to_string()))?;
+        .map_err(|_| "ffmpeg failed".to_string())?;
 
     Ok(())
 }

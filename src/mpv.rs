@@ -1,9 +1,9 @@
-use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::{path::PathBuf, process::Command};
+use std::process::Command;
+use std::{io::Write, path::Path};
 
-pub fn run(socket_path: &PathBuf) {
+pub fn run(socket_path: &Path) {
     Command::new("xwinwrap")
         .args([
             "-ov",
@@ -28,7 +28,7 @@ pub fn run(socket_path: &PathBuf) {
         .exec();
 }
 
-pub fn load_file(socket_path: &PathBuf, image_path: &PathBuf) {
+pub fn load_file(socket_path: &Path, image_path: &Path) {
     let mut socket_stream =
         UnixStream::connect(socket_path).expect("Failed to connect to MPV socket.");
 

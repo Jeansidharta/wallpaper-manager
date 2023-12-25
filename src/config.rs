@@ -4,12 +4,11 @@ use std::env;
 use std::fs::{create_dir_all, read_to_string, write};
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use toml;
 
 const ENV_VAR_XDG_CONFIG_DIR: &str = "XDG_CONFIG_HOME";
 const ENV_VAR_HOME: &str = "HOME";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Config {
     pub wallpapers_dir: Option<PathBuf>,
     pub cache_dir: Option<PathBuf>,
@@ -21,17 +20,6 @@ pub struct Config {
 pub struct ConfigResolution {
     pub width: i32,
     pub height: i32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            wallpapers_dir: None,
-            cache_dir: None,
-            socket_path: None,
-            resolution: None,
-        }
-    }
 }
 
 impl Default for ConfigResolution {
@@ -50,15 +38,15 @@ impl Config {
             .expect("Could not find configuration file parent. This is a bug");
 
         if !parent.is_dir() {
-            create_dir_all(parent).or_else(|e| match e.kind() {
-                ErrorKind::PermissionDenied => Err(format!(
+            create_dir_all(parent).map_err(|e| match e.kind() {
+                ErrorKind::PermissionDenied => format!(
                     "Permission denied when writing configuration directory at {}",
                     parent.to_string_lossy()
-                )),
-                _ => Err(format!(
+                ),
+                _ => format!(
                     "Could not create configuration file directory at {}.",
                     parent.to_string_lossy()
-                )),
+                ),
             })?;
         }
 
@@ -66,15 +54,15 @@ impl Config {
             path,
             toml::to_string(&self).expect("Failed to serialize configuration. This is a bug"),
         )
-        .or_else(|e| match e.kind() {
-            ErrorKind::PermissionDenied => Err(format!(
+        .map_err(|e| match e.kind() {
+            ErrorKind::PermissionDenied => format!(
                 "Permission denied when writing configuration at {}",
                 path.to_string_lossy()
-            )),
-            _ => Err(format!(
+            ),
+            _ => format!(
                 "Could not write configuration file at {}",
                 path.to_string_lossy()
-            )),
+            ),
         })
     }
 
@@ -86,20 +74,20 @@ impl Config {
             ));
         }
 
-        let config_contents = read_to_string(path).or_else(|e| match e.kind() {
-            ErrorKind::PermissionDenied => Err(format!(
+        let config_contents = read_to_string(path).map_err(|e| match e.kind() {
+            ErrorKind::PermissionDenied => format!(
                 "Could not open configuration file at {}. Permission Denied",
                 path.to_string_lossy()
-            )),
-            ErrorKind::NotFound => Err(format!(
+            ),
+            ErrorKind::NotFound => format!(
                 "Could not find a configuration file at {}",
                 path.to_string_lossy()
-            )),
-            _ => Err(format!("")),
+            ),
+            _ => String::new(),
         })?;
 
         toml::from_str(&config_contents)
-            .or_else(|e| Err(format!("could not parse configuration file. Error: {e}")))
+            .map_err(|e| format!("could not parse configuration file. Error: {e}"))
     }
 
     pub fn resolve_config_path_from_env() -> Result<PathBuf, ()> {
@@ -119,8 +107,7 @@ pub fn read_config(custom_config_path: Option<PathBuf>) -> Result<Config, String
     let config_path =
         custom_config_path
             .ok_or(Err(()))
-            .or_else(|_: Result<PathBuf, ()>| Config::resolve_config_path_from_env())
-            .or_else(|_| Err(format!("Could not resolve the config directory. Either provide it as a command line argument (through --config-dir), or set either the {ENV_VAR_XDG_CONFIG_DIR} or {ENV_VAR_HOME} environment variables")))?;
+            .or_else(|_: Result<PathBuf, ()>| Config::resolve_config_path_from_env()).map_err(|_| format!("Could not resolve the config directory. Either provide it as a command line argument (through --config-dir), or set either the {ENV_VAR_XDG_CONFIG_DIR} or {ENV_VAR_HOME} environment variables"))?;
 
     if !config_path.is_file() {
         if let Answer::YES = Question::new(&format!("Could not find a configuration file at {}. Would you like to create a default configuration at this location?", config_path.to_string_lossy())).confirm() {
