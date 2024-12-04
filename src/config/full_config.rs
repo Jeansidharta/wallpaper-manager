@@ -7,7 +7,7 @@ use crate::Args;
 
 use super::config_file::{ConfigFile, ConfigFileWriteError};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ConfigResolution {
     pub width: i32,
     pub height: i32,
@@ -72,6 +72,7 @@ pub fn read(args: &Args) -> Result<FullConfig, ConfigReadError> {
     };
 
     let config_file = ConfigFile::read_from(&config_file_path).unwrap();
+    dbg!(&config_file_path);
     let cache_dir = args
         .cache_dir
         .clone()

@@ -9,7 +9,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use super::full_config::ConfigResolution;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ConfigFile {
     pub wallpapers_dir: Option<PathBuf>,
     pub cache_dir: Option<PathBuf>,
